@@ -1,3 +1,6 @@
+import logging
+import typing
+
 import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
 from ckan.logic.validators import (
@@ -7,11 +10,15 @@ from ckan.logic.validators import (
 
 from .commands.test import test_ckan_cmd
 
+logger = logging.getLogger(__name__)
+
 
 class DalrrdEmcDcprPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.IClick)
     plugins.implements(plugins.IDatasetForm)
+    plugins.implements(plugins.IAuthFunctions)
+    plugins.implements(plugins.IActions)
 
     def update_config(self, config_):
         toolkit.add_template_directory(config_, "templates")
@@ -87,6 +94,7 @@ class DalrrdEmcDcprPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
 
     def update_package_schema(self):
         schema = super(DalrrdEmcDcprPlugin, self).update_package_schema()
+        logger.debug(f"schema: {schema}")
 
         update_package_validators = [
             boolean_validator,
@@ -102,3 +110,35 @@ class DalrrdEmcDcprPlugin(plugins.SingletonPlugin, toolkit.DefaultDatasetForm):
 
     def package_types(self):
         return []
+
+    def get_auth_functions(self) -> typing.Dict[str, typing.Callable]:
+        return {
+            "package_publish": authorize_package_publish,
+        }
+
+    def get_actions(self) -> typing.Dict[str, typing.Callable]:
+        return {
+            "package_update": package_update,
+        }
+
+
+def authorize_package_publish(
+    next_auth, context: typing.Dict, data_dict: typing.Optional[typing.Dict] = None
+) -> typing.Dict[str, bool]:
+    result = False
+    logger.debug(f"Inside authorize_package_publish function: {locals()}")
+    return {"success": result, "msg": "You are not authorized to publish a package"}
+
+
+@toolkit.chained_action
+def package_update(original_action, context, data_dict):
+    """
+    Intercepts the core `package_update` action to check if package is being published.
+    """
+    remains_private = toolkit.asbool(data_dict.get("private", False))
+    result = None
+    if remains_private:
+        result = original_action(context, data_dict)
+    else:
+        toolkit.check_access("package_publish", context, data_dict)
+    return result
